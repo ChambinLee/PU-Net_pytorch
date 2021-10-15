@@ -19,7 +19,7 @@ parser.add_argument('--lr_decay', type=float, default=0.71)
 parser.add_argument('--lr_clip', type=float, default=0.000001)
 parser.add_argument('--decay_step_list', type=list, default=[30, 60])
 parser.add_argument('--weight_decay', type=float, default=0.0005)
-parser.add_argument('--workers', type=int, default=4)
+parser.add_argument('--workers', type=int, default=0)
 
 args = parser.parse_args()
 print(args)

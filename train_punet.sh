@@ -1,10 +1,10 @@
 gpu=0
 model=punet
-extra_tag=punet_baseline
+extra_tag=punet_baseline5
 
 mkdir logs/${extra_tag}
 
-nohup python -u train.py \
+python -u train.py \
     --model ${model} \
     --batch_size 32 \
     --log_dir logs/${extra_tag} \
