@@ -218,9 +218,9 @@ __global__ void AuctionMatchKernel(int b,int n,const float * __restrict__ xyz1,c
 				}
 			}
 			for (int i=16;i>0;i>>=1){
-				float b1=__shfl_down(best,i,32);
-				float b2=__shfl_down(best2,i,32);
-				int bj=__shfl_down(bestj,i,32);
+				float b1=__shfl_down_sync(best,i,32);
+				float b2=__shfl_down_sync(best2,i,32);
+				int bj=__shfl_down_sync(bestj,i,32);
 				if (best<b1){
 					best2=fminf(b1,best2);
 				}else{
@@ -241,7 +241,6 @@ __global__ void AuctionMatchKernel(int b,int n,const float * __restrict__ xyz1,c
 				best2=bests[threadIdx.x][1];
 				bestj=*(int*)&bests[threadIdx.x][2];
 				for (int i=nn>>1;i>0;i>>=1){
-					float b1=__shfl_down(best,i,32);
 					float b1=__shfl_down_sync(best,i,32);
 					float b2=__shfl_down_sync(best2,i,32);
 					int bj=__shfl_down_sync(bestj,i,32);
