@@ -5,7 +5,7 @@ parser = argparse.ArgumentParser(description="Arg parser")
 parser.add_argument('--gpu', type=int, default=0, help='GPU to use')
 parser.add_argument("--model", type=str, default='punet')
 parser.add_argument('--log_dir', default='logs/test', help='Log dir [default: logs/test_log]')
-parser.add_argument('--npoint', type=int, default=1024,help='Point Number [1024/2048] [default: 1024]')
+parser.add_argument('--npoint', type=int, default=1024,help='Point Number [1024/2048] [default: 1024]') #
 parser.add_argument('--up_ratio',  type=int,  default=4, help='Upsampling Ratio [default: 4]')
 parser.add_argument('--max_epoch', type=int, default=100, help='Epochs to run [default: 100]')
 parser.add_argument('--batch_size', type=int, default=32, help='Batch Size during training')
@@ -84,8 +84,7 @@ class UpsampleLoss(nn.Module):
         return uniform_loss
 
     def forward(self, pred, gt, pcd_radius):
-        return self.get_emd_loss(pred, gt, pcd_radius) * 100, \
-            self.alpha * self.get_repulsion_loss(pred)
+        return self.get_emd_loss(pred, gt, pcd_radius) * 100, self.alpha * self.get_repulsion_loss(pred)
 
 def get_optimizer():
     if args.optim == 'adam':
@@ -97,7 +96,7 @@ def get_optimizer():
                                 weight_decay=args.weight_decay, 
                                 nesterov=True)
     else:
-        raise NotImplementedError
+        raise NotImplementedError("optimizer can only be ‘adam‘ or ’sgd’")
     
     if args.use_decay:
         def lr_lbmd(cur_epoch):
@@ -113,20 +112,31 @@ def get_optimizer():
 
 
 if __name__ == '__main__':
-    train_dst = PUNET_Dataset(npoint=args.npoint, 
-            use_random=True, use_norm=True, split='train', is_training=True)
-    train_loader = DataLoader(train_dst, batch_size=args.batch_size, 
-                        shuffle=True, pin_memory=True, num_workers=args.workers)
+    train_dst = PUNET_Dataset(  # Dataset存储了例子和标签
+        npoint=args.npoint,
+        use_random=True,
+        use_norm=True,
+        split='train',
+        is_training=True
+    )
+    train_loader = DataLoader(  # DataLoader将数据包装成可迭代的对象
+        train_dst,
+        batch_size=args.batch_size,
+        shuffle=True,
+        pin_memory=True,
+        num_workers=args.workers
+    )
 
+    # 根据args.model动态import不同的推理模型
     MODEL = importlib.import_module('models.' + args.model)
     model = MODEL.get_model(npoint=args.npoint, up_ratio=args.up_ratio, 
                 use_normal=False, use_bn=args.use_bn, use_res=args.use_res)
     model.cuda()
     
-    optimizer, lr_scheduler = get_optimizer()
-    loss_func = UpsampleLoss(alpha=args.alpha)
+    optimizer, lr_scheduler = get_optimizer()  # 优化器
+    loss_func = UpsampleLoss(alpha=args.alpha)  # 误差函数
 
-    model.train()
+    model.train()  # 设置模型为训练模式，启用dropout和batch normalization等仅训练阶段需要的操作
     for epoch in range(args.max_epoch):
         loss_list = []
         emd_loss_list = []

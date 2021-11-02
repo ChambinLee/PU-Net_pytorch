@@ -2,15 +2,16 @@ import numpy as np
 from knn_cuda import KNN
 
 def knn_point(group_size, point_cloud, query_cloud, transpose_mode=False):
-    knn_obj = KNN(k=group_size, transpose_mode=transpose_mode)
-    dist, idx = knn_obj(point_cloud, query_cloud)
+    knn_obj = KNN(k=group_size, transpose_mode=transpose_mode) # transpose_mode=False表示最后两维不转置
+    dist, idx = knn_obj(point_cloud, query_cloud) # 找query_points（）最近的K个点
     return dist, idx
 
-def nonuniform_sampling(num, sample_num):
-    sample = set()
-    loc = np.random.rand() * 0.8 + 0.1
+def nonuniform_sampling(num, sample_num):  # num为总数，sample_num为采样数
+    sample = set()  # 每次随机一个index加入集合，保证不重复
+    loc = np.random.rand() * 0.8 + 0.1  # 均匀采样一个0.1~0.9的随机数作为高斯随机的均值
     while len(sample) < sample_num:
-        a = int(np.random.normal(loc=loc, scale=0.3) * num)
+        a = int(np.random.normal(loc=loc, scale=0.3) * num)  # 以loc为均值，scale为方差的高斯分布中随机一个数并乘以总数作为采样index
+        # 判断采样的index是否在范围内，不在范围内则丢弃
         if a < 0 or a >= num:
             continue
         sample.add(a)
@@ -27,13 +28,14 @@ def save_xyz_file(numpy_array, xyz_dir):
 
 def rotate_point_cloud_and_gt(input_data, gt_data=None):
     """ Randomly rotate the point clouds to augument the dataset
-        rotation is per shape based along up direction
+        rotation is per shape based along up direction （依次沿着每个轴旋转一定的角度）
         Input:
           Nx3 array, original point cloud
         Return:
           Nx3 array, rotated point cloud
     """
-    angles = np.random.uniform(size=(3)) * 2 * np.pi
+    angles = np.random.uniform(size=(3)) * 2 * np.pi  # 随机三个在0~360度的角度值，作为欧拉角
+    # 将欧拉角转换成旋转矩阵
     Rx = np.array([[1, 0, 0],
                    [0, np.cos(angles[0]), -np.sin(angles[0])],
                    [0, np.sin(angles[0]),  np.cos(angles[0])]])
@@ -46,12 +48,13 @@ def rotate_point_cloud_and_gt(input_data, gt_data=None):
     rotation_matrix = np.dot(Rz, np.dot(Ry, Rx))
 
     input_data[:, :3] = np.dot(input_data[:, :3], rotation_matrix)
-    if input_data.shape[1] > 3:
+    if input_data.shape[1] > 3:  # 如果包含法向量，法向量也要做相同的旋转
         input_data[:, 3:] = np.dot(input_data[:, 3:], rotation_matrix)
     
     if gt_data is not None:
+        # gt和input做相同的旋转
         gt_data[:, :3] = np.dot(gt_data[:, :3], rotation_matrix)
-        if gt_data.shape[1] > 3:
+        if gt_data.shape[1] > 3:  # 法向量
             gt_data[:, 3:] = np.dot(gt_data[:, 3:], rotation_matrix)
 
     return input_data, gt_data
@@ -94,9 +97,10 @@ def jitter_perturbation_point_cloud(input_data, sigma=0.005, clip=0.02):
           Nx3 array, jittered point cloud
     """
     assert(clip > 0)
+    # jitter的形成：首先对input的每个点随机一个随机值，然后将这些值clip到（-clip,clip）之间，防止抖动太大
     jitter = np.clip(sigma * np.random.randn(*input_data.shape), -1 * clip, clip)
-    jitter[:, 3:] = 0
-    input_data += jitter
+    jitter[:, 3:] = 0  # 只jitter坐标，不jitter法向量
+    input_data += jitter  # 对每个输入点做一个小抖动
     return input_data
 
 

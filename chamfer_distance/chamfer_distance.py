@@ -1,5 +1,5 @@
 import torch
-from torch.utils.cpp_extension import load
+from torch.utils.cpp_extension import load  # 使用JIT的方式用于编译cpp和cu文件
 import os
 
 script_dir = os.path.dirname(__file__)
