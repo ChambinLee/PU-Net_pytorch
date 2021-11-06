@@ -12,11 +12,11 @@ am = load(name="am", sources=sources)
 
 class AuctionMatch(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, xyz1: torch.Tensor, xyz2: int) -> torch.Tensor:
+    def forward(ctx, xyz1: torch.Tensor, xyz2: torch.Tensor) -> torch.Tensor:
         """
         Uses iterative furthest point sampling to select a set of npoint features that have the largest
         minimum distance
-        :param ctx:
+        :param ctx: ctx在这里类似self，ctx的属性可以在backward中调用
         :param xyz1: (B, N, 3)
         :param xyz2: (B, N, 3)
         :return:
@@ -27,7 +27,7 @@ class AuctionMatch(torch.autograd.Function):
         assert xyz1.shape[1] <= 4096
 
         B, N, _ = xyz1.size()
-        match_left = torch.cuda.IntTensor(B, N)
+        match_left = torch.cuda.IntTensor(B, N)  # 空向量
         match_right = torch.cuda.IntTensor(B, N)
         temp = torch.cuda.FloatTensor(B, N, N).fill_(0)
 

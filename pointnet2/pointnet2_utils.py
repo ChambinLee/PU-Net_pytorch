@@ -35,9 +35,8 @@ class FurthestPointSampling(Function):
 
 furthest_point_sample = FurthestPointSampling.apply
 
-
+# 根据点的index找到点的坐标
 class GatherOperation(Function):
-
     @staticmethod
     def forward(ctx, features: torch.Tensor, idx: torch.Tensor) -> torch.Tensor:
         """

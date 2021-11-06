@@ -48,15 +48,15 @@ class UpsampleLoss(nn.Module):
         self.h = h
         self.eps = eps
 
-    def get_emd_loss(self, pred, gt, pcd_radius):
-        idx, _ = auction_match(pred, gt)
-        matched_out = pn2_utils.gather_operation(gt.transpose(1, 2).contiguous(), idx)
+    def get_emd_loss(self, pred, gt, pcd_radius):  # Earth Mover's distance
+        idx, _ = auction_match(pred, gt)  # 使用EMD方法找到pred与gt最佳的对应关系，返回的是gt的index
+        matched_out = pn2_utils.gather_operation(gt.transpose(1, 2).contiguous(), idx)  # 根据gt的index找到对应的点
         matched_out = matched_out.transpose(1, 2).contiguous()
-        dist2 = (pred - matched_out) ** 2
-        dist2 = dist2.view(dist2.shape[0], -1) # <-- ???
-        dist2 = torch.mean(dist2, dim=1, keepdims=True) # B,
-        dist2 /= pcd_radius
-        return torch.mean(dist2)
+        dist2 = (pred - matched_out) ** 2  # 最佳匹配的点对欧式距离（平方）,(batch_size,4096,3)
+        dist2 = dist2.view(dist2.shape[0], -1)  # 一个batch中所有patch的所有点的误差，(batch_size,4096*3)
+        dist2 = torch.mean(dist2, dim=1, keepdims=True) # 求所有点的误差的平均值，得到每个patch的emd loss，(batch_size,1)
+        dist2 /= pcd_radius  # dist2和pcd_radius都是(32,1)，误差除以各自patch的半径可以消除不同patch大小导致的误差尺度不一致问题
+        return torch.mean(dist2)  # 最终返回一个patch所有patch的emd loss的平均值
 
     def get_cd_loss(self, pred, gt, pcd_radius):
         cost_for, cost_bac = chamfer_distance(gt, pred)
@@ -142,20 +142,24 @@ if __name__ == '__main__':
         emd_loss_list = []
         rep_loss_list = []
         for batch in train_loader:
-            optimizer.zero_grad()
-            input_data, gt_data, radius_data = batch
+            optimizer.zero_grad()  # 每个batch开始的时候设置所有变量梯度为0
+            input_data, gt_data, radius_data = batch  # 获得训练数据
 
             input_data = input_data.float().cuda()
             gt_data = gt_data.float().cuda()
-            gt_data = gt_data[..., :3].contiguous()
+            gt_data = gt_data[..., :3].contiguous()  # 后面需要调用view方法，所以先申请连续内存
             radius_data = radius_data.float().cuda()
 
+            # 模型推理
             preds = model(input_data)
+
+            # 计算loss
             emd_loss, rep_loss = loss_func(preds, gt_data, radius_data)
             loss = emd_loss + rep_loss
 
-            loss.backward()
-            optimizer.step()
+            # 更新权重
+            loss.backward()  # loss反向传播
+            optimizer.step()  # 使用优化器更新权重
 
             loss_list.append(loss.item())
             emd_loss_list.append(emd_loss.item())

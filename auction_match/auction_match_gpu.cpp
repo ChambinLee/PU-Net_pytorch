@@ -13,6 +13,8 @@ int auction_match_wrapper_fast(int b, int n,
     float *cost = cost_tensor.data<float>();
 
     AuctionMatchLauncher(b, n, xyz1, xyz2, matchl, matchr, cost);
+    // 这里为什么不需要处理异步呢？
+    // 为什么不用声明网格和块的大小呢？
     return 1;
 }
 
