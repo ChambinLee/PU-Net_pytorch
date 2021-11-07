@@ -95,6 +95,10 @@ __global__ void AuctionMatchKernel(int b,int n,const float * __restrict__ xyz1,c
                 我们用j遍历gt中第bno个patch的所有点，对于每个点我们计算buf中512个点到这个点的距离，
                 并存储到cost矩阵中，位置为（bno,k,j），对应的位置为bno*n*n+k*n+j。
                 可是这里为什么使用的是cost[blockIdx.x*n*n+k*n+j]，blockIdx.x的大小范围是0~32，如果batch大于这个数了怎么办？
+                没关系，因为grid一次只能处理blockIdx.x对点云，总共有b组点云，分成很多组进行处理。
+                对于后面的组，前面的组计算的cost矩阵完全没用，直接覆盖就好了。
+                所以cost矩阵是过大了的，其实仅仅需要blockIdx.x*n*n就行了，但是cost设置为b*n*n非常保险，
+                如果blockIdx.x大于b，则后面的block是闲置的，仅前b个会忙碌，不会访问溢出。
             **/
 			for (int j=threadIdx.x;j<n;j+=blockDim.x){  // j from 0 to 4096，处理一个patch中所有的点，一次循环里对坐标的三个数字操作
 			    // bno*n*3表示依然是每个block处理一个patch，j*3表示第j个点的起始位置
@@ -398,6 +402,16 @@ __global__ void AuctionMatchKernel(int b,int n,const float * __restrict__ xyz1,c
 					qhead-=n;
 				int old=matchrbuf[bestj];  // （4096，1），目前谁到第二个点云中第bestj个点最近
 				pricer[bestj]+=delta;  // 一个点的价格等于这个点到达最近点和次近点的距离差
+				/**
+				    为什么要这么定义price？
+				    我的理解是，一个点的价格为最近点和次近点的距离差，
+				    这个距离越大，说明如果把这个点指派到非最近点会造成的结果更差。
+				    为了整体均衡，我们需要指派一些点不和它们的最近点匹配，
+				    但是如果能够保证这些点是距离次近点没那么远的点，
+				    而那些距离次近点远很多的点，最好不要动它们
+				**/
+
+
 				cnt++;  // while循环的次数
 				if (old!=-1){  // matchrbuf是用-1填充的，所以如果之前没有那个点到这个点最近，那么old==1
 					int ql=qlen;
@@ -416,16 +430,23 @@ __global__ void AuctionMatchKernel(int b,int n,const float * __restrict__ xyz1,c
 			}
 
 			__syncthreads();
-			if (threadIdx.x==0){
-				matchrbuf[bestj]=i;
+			if (threadIdx.x==0){  // 赋值操作仅需要一个线程来完成就行，避免多个线程同时写一块内存
+				matchrbuf[bestj]=i;  // 第二个点云中bestj个点与第一个点云中第i个点配对
 			}
 		}
-		__syncthreads();
+		__syncthreads();  // matchrbuf是__shared__，需要在这里同步块内线程
+
+
+
 		for (int j=threadIdx.x;j<n;j+=blockDim.x)
+		    // 使用matchrbuf中每个点对应的最近点的序号更新matchr
+		    // matchr表示第二个点云中的每个点和第一个点云中每个点的配对信息
 			matchr[bno*n+j]=matchrbuf[j];
 		for (int j=threadIdx.x;j<n;j+=blockDim.x)
+		    // 更新matchl，保证和matchr中的配对情况一致
 			matchl[bno*n+matchrbuf[j]]=j;
 		__syncthreads();
+		// 到此为止，点的配对情况计算完成，分别保存在matchr和matchl中，我们只需要matchl就行
 	}
 }
 void AuctionMatchLauncher(int b,int n,const float * xyz1,const float * xyz2,int * matchl,int * matchr,float * cost){
