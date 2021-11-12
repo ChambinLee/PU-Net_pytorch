@@ -71,7 +71,7 @@ __global__ void AuctionMatchKernel(int b,int n,const float * __restrict__ xyz1,c
                     保证我们不会访问越界。
                     对于512个点，需要继续分组给grid中的block的线程进行处理，外层循环k0保证遍历了一个点云的所有点，
                     但是我们并不是只有一个patch，所以这里是用每个block处理一个patch，
-                    所以对于一个线程，其处于bno个block的threadIdx.x位置上，应该处理的是第bno个patch的512*3个数字中的
+                    所以对于一个线程，其处于第bno%32个block的threadIdx.x位置上，应该处理的是第bno%32个patch的512*3个数字中的
                     第threadIdx.x、threadIdx.x+blockDim.x、threadIdx.x+blockDim.x+blockDim.x……个数字，
                     如果bno小于batch_size，那么后面的patch怎么被处理到呢？实际上在最开始的for循环已经将batch进行了分组，
                     所以如果batch_size大于block_num，那么每次只会处理不多于block_num个patch,
@@ -339,100 +339,99 @@ __global__ void AuctionMatchKernel(int b,int n,const float * __restrict__ xyz1,c
 			    但是这些最小值都存放在各自线程的寄存器中，并不能直接共享，
 			    所以这里要用线程束洗牌指令将不同的线程中的数据合并起来
 			**/
-			for (int i=16;i>0;i>>=1){  // i = 16，8，4，2，1
-			    // 得到当前线程在warp中的编号（0~32）减去i的线程的 best、best2、bestj 变量的值，分别存在 b1、b2、bj 中
-			    // 根据之后填充bests的逻辑来看，这个循环可以将一个warp中的所有线程中的最小值进行比较，并最终存放在0，32，64，……，480这些线程上
-			    // 也就是每个warp的最后一个线程会和warp内的所有线程进行比较，得到这32个线程中的最小值
-				float b1=__shfl_down_sync(0xFFFFFFFF,best,i,32);
-				float b2=__shfl_down_sync(0xFFFFFFFF,best2,i,32);
-				int bj=__shfl_down_sync(0xFFFFFFFF,bestj,i,32);
+            for (int i=16;i>0;i>>=1){  // i = 16，8，4，2，1
+                // 得到当前线程在warp中的编号（0~32）减去i的线程的 best、best2、bestj 变量的值，分别存在 b1、b2、bj 中
+                // 根据之后填充bests的逻辑来看，这个循环可以将一个warp中的所有线程中的最小值进行比较，并最终存放在0，32，64，……，480这些线程上
+                // 也就是每个warp的最后一个线程会和warp内的所有线程进行比较，得到这32个线程中的最小值
+                float b1=__shfl_down_sync(0xFFFFFFFF,best,i,32);
+                float b2=__shfl_down_sync(0xFFFFFFFF,best2,i,32);
+                int bj=__shfl_down_sync(0xFFFFFFFF,bestj,i,32);
 
-				// 比较另一个线程中的最小值、次小值和当前线程中的最小值、次小值，
-				if (best<b1){  // best<b1<b2, best<best2, 次小值在b1和best2中
-					best2=fminf(b1,best2);
-				}else{  // b1<best<best2, b1<b2, 次小值在best和b2中
-					best=b1;
-					best2=fminf(best,b2);
-					bestj=bj;
-				}
-			}
-			// 如果当前线程是块中最后一个线程
-			if ((threadIdx.x&31)==0){  // 符合条件的是0，32，64，……，480，可以直接用%的
-			    /**
-			        bests的形状是(32, 3)，我们有512个线程，将512个线程的结果分32组存放在bests中
+                // 比较另一个线程中的最小值、次小值和当前线程中的最小值、次小值，
+                if (best<b1){  // best<b1<b2, best<best2, 次小值在b1和best2中
+                    best2=fminf(b1,best2);
+                }else{  // b1<best<best2, b1<b2, 次小值在best和b2中
+                    best=b1;
+                    best2=fminf(best,b2);
+                    bestj=bj;
+                }
+            }
+            if ((threadIdx.x&31)==0){  // 符合条件的是0，32，64，……，480，可以直接用%的
+                /**
+                    bests的形状是(32, 3)，我们有512个线程，将512个线程的结果分32组存放在bests中
                     线程序号为threadIdx.x的线程结果存放在bests[threadIdx.x % 32][:]的三个位置上
                     注意，并不会冲突，因为符合条件的线程id为0，32，64，……，480，它们分别存储在bests的0，1，2，……，15位置上
-			    **/
-				bests[threadIdx.x>>5][0]=best;
-				bests[threadIdx.x>>5][1]=best2;
-				*(int*)&bests[threadIdx.x>>5][2]=bestj;  // 这是什么语法
-			}
-			__syncthreads();  // 保证bests矩阵赋值完成
+                **/
+                bests[threadIdx.x>>5][0]=best;
+                bests[threadIdx.x>>5][1]=best2;
+                *(int*)&bests[threadIdx.x>>5][2]=bestj;  // 这是什么语法
+            }
+            __syncthreads();  // 保证bests矩阵赋值完成
 
-			int nn=blockDim.x>>5;  // 512>>5=16
+            int nn=blockDim.x>>5;  // 512>>5=16
 
-			/**
-			    至此，对于xyz中的任意一个点，我们得到了它到xyz中对应patch的4096个点的距离中最小的16个，分别存在bests的前十六行。
-			    接下来，很自然，我们要根据这十六个距离得到这个点到4096个点的最近距离。
-			    根据后面的逻辑，这里会将最优结果保存在第0个线程中
-			**/
-			if (threadIdx.x<nn){
-				best=bests[threadIdx.x][0];
-				best2=bests[threadIdx.x][1];
-				bestj=*(int*)&bests[threadIdx.x][2];
-				for (int i=nn>>1;i>0;i>>=1){  // i = 8,4,2,1
-					float b1=__shfl_down_sync(0xFFFFFFFF,best,i,32);
-					float b2=__shfl_down_sync(0xFFFFFFFF,best2,i,32);
-					int bj=__shfl_down_sync(0xFFFFFFFF,bestj,i,32);
-					if (best<b1){
-						best2=fminf(b1,best2);
-					}else{
-						best=b1;
-						best2=fminf(best,b2);
-						bestj=bj;
-					}
-				}
-			}
+            /**
+                至此，对于xyz中的任意一个点，我们得到了它到xyz中对应patch的4096个点的距离中最小的16个，分别存在bests的前十六行。
+                接下来，很自然，我们要根据这十六个距离得到这个点到4096个点的最近距离。
+                根据后面的逻辑，这里会将最优结果保存在第0个线程中
+            **/
+            if (threadIdx.x<nn){
+                best=bests[threadIdx.x][0];
+                best2=bests[threadIdx.x][1];
+                bestj=*(int*)&bests[threadIdx.x][2];
+                for (int i=nn>>1;i>0;i>>=1){  // i = 8,4,2,1
+                    float b1=__shfl_down_sync(0xFFFFFFFF,best,i,32);
+                    float b2=__shfl_down_sync(0xFFFFFFFF,best2,i,32);
+                    int bj=__shfl_down_sync(0xFFFFFFFF,bestj,i,32);
+                    if (best<b1){
+                        best2=fminf(b1,best2);
+                    }else{
+                        best=b1;
+                        best2=fminf(best,b2);
+                        bestj=bj;
+                    }
+                }
+            }
 
-			if (threadIdx.x==0){
-				float delta=best2-best+tolerance;  // 这个block负责的xyz1中的这个点到xyz2中的4096个点的最近距离、次近距离
-				qhead++;
-				qlen--;  // qlen = 4096，4095，……，1
-				if (qhead>=n)  // 如果qhead遍历到xyz1对应patch的最后一点，再从第一个点重新遍历
-					qhead-=n;
-				int old=matchrbuf[bestj];  // （4096，1），目前谁到第二个点云中第bestj个点最近
-				pricer[bestj]+=delta;  // 一个点的价格等于这个点到达最近点和次近点的距离差
-				/**
-				    为什么要这么定义price？
-				    我的理解是，一个点的价格为最近点和次近点的距离差，
-				    这个距离越大，说明如果把这个点指派到非最近点会造成的结果更差。
-				    为了整体均衡，我们需要指派一些点不和它们的最近点匹配，
-				    但是如果能够保证这些点是距离次近点没那么远的点，
-				    而那些距离次近点远很多的点，最好不要动它们
-				**/
+            if (threadIdx.x==0){
+                float delta=best2-best+tolerance;  // 这个block负责的xyz1中的这个点到xyz2中的4096个点的最近距离、次近距离
+                qhead++;
+                qlen--;  // qlen = 4096，4095，……，1
+                if (qhead>=n)  // 如果qhead遍历到xyz1对应patch的最后一点，再从第一个点重新遍历
+                    qhead-=n;
+                int old=matchrbuf[bestj];  // （4096，1），目前谁到第二个点云中第bestj个点最近
+                pricer[bestj]+=delta;  // 一个点的价格等于这个点到达最近点和次近点的距离差
+                /**
+                    为什么要这么定义price？
+                    我的理解是，一个点的价格为最近点和次近点的距离差，
+                    这个距离越大，说明如果把这个点指派到非最近点会造成的结果更差。
+                    为了整体均衡，我们需要指派一些点不和它们的最近点匹配，
+                    但是如果能够保证这些点是距离次近点没那么远的点，
+                    而那些距离次近点远很多的点，最好不要动它们
+                **/
 
 
-				cnt++;  // while循环的次数
-				if (old!=-1){  // matchrbuf是用-1填充的，所以如果之前没有那个点到这个点最近，那么old==1
-					int ql=qlen;
-					int tail=qhead+ql;  // tail =
-					qlen=ql+1;
-					if (tail>=n)
-						tail-=n;
-					Queue[tail]=old;
-				}
-				if (cnt==(40*n)){
-					if (tolerance==1.0)
-						qlen=0;
-					tolerance=fminf(1.0,tolerance*100);
-					cnt=0;
-				}
-			}
+                cnt++;  // while循环的次数
+                if (old!=-1){  // matchrbuf是用-1填充的，所以如果之前没有那个点到这个点最近，那么old==1
+                    int ql=qlen;
+                    int tail=qhead+ql;  // tail =
+                    qlen=ql+1;
+                    if (tail>=n)
+                        tail-=n;
+                    Queue[tail]=old;
+                }
+                if (cnt==(40*n)){
+                    if (tolerance==1.0)
+                        qlen=0;
+                    tolerance=fminf(1.0,tolerance*100);
+                    cnt=0;
+                }
+            }
 
-			__syncthreads();
-			if (threadIdx.x==0){  // 赋值操作仅需要一个线程来完成就行，避免多个线程同时写一块内存
-				matchrbuf[bestj]=i;  // 第二个点云中bestj个点与第一个点云中第i个点配对
-			}
+            __syncthreads();
+            if (threadIdx.x==0){  // 赋值操作仅需要一个线程来完成就行，避免多个线程同时写一块内存
+                matchrbuf[bestj]=i;  // 第二个点云中bestj个点与第一个点云中第i个点配对
+            }
 		}
 		__syncthreads();  // matchrbuf是__shared__，需要在这里同步块内线程
 

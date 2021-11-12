@@ -32,7 +32,7 @@ class AuctionMatch(torch.autograd.Function):
         temp = torch.cuda.FloatTensor(B, N, N).fill_(0)
 
         am.auction_match_cuda(B, N, xyz1, xyz2, match_left, match_right, temp)
-        return match_left, match_right
+        return match_left, match_right,temp
 
     @staticmethod
     def backward(ml, mr, a=None):

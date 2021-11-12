@@ -49,7 +49,8 @@ class UpsampleLoss(nn.Module):
         self.eps = eps
 
     def get_emd_loss(self, pred, gt, pcd_radius):  # Earth Mover's distance
-        idx, _ = auction_match(pred, gt)  # 使用EMD方法找到pred与gt最佳的对应关系，返回的是gt的index
+        idx, _,temp = auction_match(pred, gt)  # 使用EMD方法找到pred与gt最佳的对应关系，返回的是gt的index
+        temp_sum = torch.sum(temp,dim=2)
         matched_out = pn2_utils.gather_operation(gt.transpose(1, 2).contiguous(), idx)  # 根据gt的index找到对应的点
         matched_out = matched_out.transpose(1, 2).contiguous()
         dist2 = (pred - matched_out) ** 2  # 最佳匹配的点对欧式距离（平方）,(batch_size,4096,3)
