@@ -2,13 +2,13 @@ import argparse
 import os
 
 parser = argparse.ArgumentParser(description="Arg parser")
-parser.add_argument('--gpu', type=int, default=0, help='GPU to use')
+parser.add_argument('--gpu', type=int, default=1, help='GPU to use')
 parser.add_argument("--model", type=str, default='punet')
 parser.add_argument('--log_dir', default='logs/test', help='Log dir [default: logs/test_log]')
 parser.add_argument('--npoint', type=int, default=1024,help='Point Number [1024/2048] [default: 1024]') #
 parser.add_argument('--up_ratio',  type=int,  default=4, help='Upsampling Ratio [default: 4]')
 parser.add_argument('--max_epoch', type=int, default=100, help='Epochs to run [default: 100]')
-parser.add_argument('--batch_size', type=int, default=32, help='Batch Size during training')
+parser.add_argument('--batch_size', type=int, default=16, help='Batch Size during training')
 parser.add_argument("--use_bn", action='store_true', default=False)
 parser.add_argument("--use_res", action='store_true', default=False)
 parser.add_argument("--alpha", type=float, default=1.0) # for repulsion loss
@@ -49,9 +49,9 @@ class UpsampleLoss(nn.Module):
         self.eps = eps
 
     def get_emd_loss(self, pred, gt, pcd_radius):  # Earth Mover's distance
-        idx, _,temp = auction_match(pred, gt)  # 使用EMD方法找到pred与gt最佳的对应关系，返回的是gt的index
-        temp_sum = torch.sum(temp,dim=2)
+        idx, _ = auction_match(pred, gt)  # 使用EMD方法找到pred与gt最佳的对应关系，返回的是gt的index
         matched_out = pn2_utils.gather_operation(gt.transpose(1, 2).contiguous(), idx)  # 根据gt的index找到对应的点
+        print("test ok")
         matched_out = matched_out.transpose(1, 2).contiguous()
         dist2 = (pred - matched_out) ** 2  # 最佳匹配的点对欧式距离（平方）,(batch_size,4096,3)
         dist2 = dist2.view(dist2.shape[0], -1)  # 一个batch中所有patch的所有点的误差，(batch_size,4096*3)

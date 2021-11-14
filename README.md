@@ -69,7 +69,7 @@ python eval.py --gpu 0 --resume logs/punet_baseline/punet_epoch_99.pth
 Run the following commands to generate upsampled datas from full mesh objects with 5k points. Upsampled point clouds are saved in `./outputs/punet_baseline/*.ply`. And the dumpped `*.xyz` files are used for NUC calculation.
 
 ```shell
-mkdir outputs
+`mkdir outputs`
 bash test_punet.sh
 ```
 

@@ -55,7 +55,7 @@
   - 下图为PointNet++与PU-Net中合并local feature和global feature的区别，层级式地提取特征的过程可以认为是一样的（层级不一样而已）。![image-20211007142831149](img/Untitled.assets/image-20211007142831149.png)
   - 插值特征的方式与PointNet++相同，均使用待插值点最近的K个点（论文中K=3）的特征加权得到，权值为归一化后的欧氏距离的倒数。
   - 为了让网络能够学习到每层特征对于重建的重要性，作者将合并feature过程中不同层的权重设置为可学习的参数。
-  
+
 - 代码：
 
   - 将PointNet++作为黑盒使用的化，这部分的代码就变得比较简单了，定义网络的代码如下：
@@ -136,9 +136,10 @@
 - 经过上一个模块以后，每个点的特征都被Embedding为一个特征向量，其中包含每个点的局部和全局特征，显然输入的每个点与point feature embedding模块输出的每个点存在着一一对应的关系，那么只要我们扩增特征的数量，就相当于我们在扩增点的数量。
 
 - 这里扩增的方式为简单的直接复制，将point feature embedding模块得到的$N \times \tilde C$复制$r$份，$r$为上采样率，然后将复制的每份作为一个分支，每个经过一系列不同的$1 \times 1$卷积运算，卷积仅在每个点的特征上进行，点与点之间没有相互作用。这里需要说明以下两点
+
   - 第一点：在embedding以后，每个点理论上应该包含了其领域信息，所以其有能力表达出其周围的信息，也应当具备对其附近进行上采样的能力。
   - 第二点：经过多层卷积的原因是为了保证复制得到的相同的特征具有足够的多样性，否则会导致来自相同特征的点重建后距离太近。
-  
+
 - 代码
 
   - Feature Expansion模块虽然看起来操作比较多，但是实际上每次都仅仅使用了一个FC层，这部分所使用到的网络定义如下：
@@ -222,19 +223,19 @@
   L_{r e p}=\sum_{i=0}^{\hat{N}} \sum_{i^{\prime} \in K(i)} \eta\left(\left\|x_{i^{\prime}}-x_{i}\right\|\right) w\left(\left\|x_{i^{\prime}}-x_{i}\right\|\right)
   \end{equation}
   $$
-  
+
   - 其中$\hat N = rN$表示输出点云的点数量，外层$\Sigma$遍历了所有生成的点。
-  
+
   - $K(i)$表示点$x_i$最近的$k$个点的index，对于每个生成的点，内层的$\Sigma$遍历了其最近的$k$个点。
-  
+
   - $\left\|x_{i^{\prime}}-x_{i}\right\|$表示两点之间的距离，$\left\|·\right\|$表示L2-norm。
-  
+
   - $\eta(r)=-r$称为排斥项，负号是因为希望$L_{res}$的绝对值越大越好。$L_{res}$的绝对值越大说明点之间距离越大。
-  
+
   - $w(r)=e^{-r^2/h^2}$是一个fast-decaying weight function，表示对排斥项的加权，$r$接近$0$则权重越大，受到的惩罚越大。将h设置为0.05，可以得到 如下函数图像：
-  
+
     ![image-20211007185710960](img/PU-Net.assets/image-20211007185710960.png)
-  
+
 - 整体的Loss：
   $$
   \begin{equation}
@@ -250,16 +251,7 @@
   - 首先是EMD loss:
 
     ```python
-    def get_emd_loss(self, pred, gt, pcd_radius):
-        idx, _,temp = auction_match(pred, gt)
-        temp_sum = torch.sum(temp,dim=2)
-        matched_out = pn2_utils.gather_operation(gt.transpose(1, 2).contiguous(), idx)
-        matched_out = matched_out.transpose(1, 2).contiguous()
-        dist2 = (pred - matched_out) ** 2
-        dist2 = dist2.view(dist2.shape[0], -1)(batch_size,4096*3)
-        dist2 = torch.mean(dist2, dim=1, keepdims=True)
-        dist2 /= pcd_radius
-        return torch.mean(dist2)
+    def get_emd_loss(self, pred, gt, pcd_radius):    idx, _,temp = auction_match(pred, gt)    temp_sum = torch.sum(temp,dim=2)    matched_out = pn2_utils.gather_operation(gt.transpose(1, 2).contiguous(), idx)    matched_out = matched_out.transpose(1, 2).contiguous()    dist2 = (pred - matched_out) ** 2    dist2 = dist2.view(dist2.shape[0], -1)(batch_size,4096*3)    dist2 = torch.mean(dist2, dim=1, keepdims=True)    dist2 /= pcd_radius    return torch.mean(dist2)
     ```
 
     - 其中，`auction_match`函数用于求解输入的两个点云的EMD，其在实现时实际上实在求解一个指派问题，并使用了拍卖算法进行了并行求解，我在[另一篇笔记](https://github.com/ChambinLee/CUDA_with_PyTorch/blob/main/complex_example_interpretation/EMD_Interpretation.md)中详细地解释了这个算法以及CUDA实现。该函数返回最优的映射关系`idx`。然后通过使用最优映射关系计算两个点云的EMD的距离。
@@ -294,10 +286,36 @@
 
     > 这里省略了权重衰减项。
 
-## PU-Net的一些问题：
+## 一些自己的想法：
 
-- PU-Net的输入是Patch，每个Patch的密度被认为是均匀的，其会对输入的patch进行均匀的上采样。其对具有稀疏程度不均匀的输入点云的效果不好（待验证）。
-- PU-Net的上采样率是固定的，也就是说一个训练好的PU-Net其只能进行一种上采样率，也就是说，如果输入点云密度不均匀，上采样后依然会密度不均匀，其只能做到输入patch上采样后密度均匀。
+### 密度不均匀问题
 
+- PU-Net的输入是Patch，每个Patch的密度被认为是均匀的，其会对输入的patch进行均匀的上采样。其对具有稀疏程度不均匀的输入点云的效果不好（待验证）。如果输入点云密度不均匀，上采样后依然会密度不均匀。然而，真实采集到的点云往往在距离采集设备更远的地方更稀疏 ，所以我认为如何做到密度自适应的上采样保证对密度不同的区域进行针对性地上采样也是一个值得研究的问题。结果见后图。
 
+  - 如何解决这个问题呢？想到的一个方法是首先在网络一开始计算每个点的局部密度，然后在Feature Expansion的结构中加入Dropout，局部密度大越大的点越有可能被丢弃。假设输入点云为$P=\{p_1,p_2,...,p_n\}$，每个点$p_i$的局部密度为$d_i$，如果每个点不被drop的概率为$\frac{\alpha}{d_i} $，其中$\alpha$为超参数，那么理论上每个点$p_i$的局部密度经过上采样后的密度均为$\alpha$，通过调节$\alpha$理论上就可以将密度不均匀的点云上采样至均匀的点云。
+
+  - 基于上面的想法，我们应当在loss函数中加入对不均匀上采样的惩罚。记上采样后点云$P^{\prime}=\{p_1^{\prime},p_2^{\prime},...,p_m^{\prime}\}$每个点的局部密度为$d^{\prime}_i$，则惩罚可以表示为上采样后点云中所有点的局部密度的方差：
+    $$
+    L_{dst}=\frac{\sum\left(d_{i}^{\prime}-\bar{d^{\prime}}\right)^{2}}{m-1}
+    $$
+
+### 网络泛化能力
+
+- PU-Net的上采样率是固定的，也就是说一个训练好的PU-Net其只能进行一种上采样率，如果我们想对不同稀疏程度的点云进行不同程度的上采样，包括Meta-PU在内的一些工作就是针对这一点进行了改进。对于这个问题，我暂时没有什么好的想法，但是会持续关注。
+
+## 运行结果展示
+
+- 一些常见的规则点云测试结果见： [results.md](results.md) 
+
+- 对于密度不均匀点云的上采样结果如下，可以看到，PU-Net对于密度不均匀的输入点云得到的结果依然是密度不均匀的。
+
+  ![image-20211114164622837](/home/chambin/Documents/GitHub/PU-Net_pytorch/NOTE/PU-Net.assets/image-20211114164622837.png)
+
+## 环境搭建的一些注意事项
+
+- 经过不知道多少次测试后证明，项目可以可以在CUDA10.0、pytorch1.2、python3.6.6上正确运行。
+
+  > 对于30系的显卡，最低的CUDA要求为11.0，但是CUDA11.0弃用了该项目的一些语法（例如`__shfl_down`），直接使用将无法成功编译核函数，需要根据报错信息修改PointNet++和PU-Net中核函数的一些语句。我尝试修改以后虽然能够成功运行，但是运行结果是错的，loss居高不下。故为了保持正确性，强烈建议使用上述环境，避免一些不必要的麻烦和重复劳动。
+
+- 如果编译核函数遇到pytorch报错C++与pytorch版本不和，可以参考这个[页面](https://github.com/NVIDIA/apex/issues/974)使用`export CXX=g++`将编译器换成g++。
 

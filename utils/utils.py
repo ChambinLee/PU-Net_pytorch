@@ -1,4 +1,6 @@
 import numpy as np
+import torch
+print("import torch")
 from knn_cuda import KNN
 
 def knn_point(group_size, point_cloud, query_cloud, transpose_mode=False):
