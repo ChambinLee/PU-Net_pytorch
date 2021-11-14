@@ -309,7 +309,7 @@
 
 - 对于密度不均匀点云的上采样结果如下，可以看到，PU-Net对于密度不均匀的输入点云得到的结果依然是密度不均匀的。
 
-  ![image-20211114164622837](/home/chambin/Documents/GitHub/PU-Net_pytorch/NOTE/PU-Net.assets/image-20211114164622837.png)
+  ![image-20211114164622837](./PU-Net.assets/image-20211114164622837.png)
 
 ## 环境搭建的一些注意事项
 
